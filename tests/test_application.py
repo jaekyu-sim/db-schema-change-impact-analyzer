@@ -39,6 +39,17 @@ class ApplicationTest(unittest.TestCase):
             with self.assertRaises(ValueError):
                 discover_projects(directory)
 
+    def test_does_not_write_empty_reports_when_no_target_write_is_detected(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "test" / "read-only-project"
+            project.mkdir(parents=True)
+            (project / "pom.xml").write_text("<project/>", encoding="utf-8")
+            (project / "Reader.java").write_text('class Reader { String sql = "SELECT id FROM source_table"; }', encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "Target write column"):
+                analyze(root / "test", root / "output")
+            self.assertEqual([], list((root / "output").iterdir()))
+
 
 if __name__ == "__main__":
     unittest.main()

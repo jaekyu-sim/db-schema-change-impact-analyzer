@@ -28,6 +28,11 @@ class MyBatisDetector(Detector):
             except ET.ParseError:
                 continue
             namespace = root.attrib.get("namespace")
+            fragments = {
+                element.attrib["id"]: element
+                for element in root.iter()
+                if element.tag.rsplit("}", 1)[-1].lower() == "sql" and element.attrib.get("id")
+            }
             for element in root.iter():
                 tag = element.tag.rsplit("}", 1)[-1].lower()
                 if tag not in self.STATEMENTS:
@@ -35,7 +40,7 @@ class MyBatisDetector(Detector):
                 statement_id = element.attrib.get("id", "<anonymous>")
                 marker = f'id="{statement_id}"'
                 line = file.content[:file.content.find(marker)].count("\n") + 1 if marker in file.content else 1
-                sql = compact_sql("".join(element.itertext()))
+                sql = compact_sql(self._render_sql(element, fragments))
                 if not sql:
                     continue
                 unit_id = sql_id(self.name, file.relative_path, line, sql)
@@ -53,6 +58,18 @@ class MyBatisDetector(Detector):
                 self._add_operations(result, unit_id, location, sql, kind)
         return result
 
+    @classmethod
+    def _render_sql(cls, element: ET.Element, fragments: dict[str, ET.Element]) -> str:
+        parts = [element.text or ""]
+        for child in element:
+            tag = child.tag.rsplit("}", 1)[-1].lower()
+            if tag == "include" and child.attrib.get("refid") in fragments:
+                parts.append(cls._render_sql(fragments[child.attrib["refid"]], fragments))
+            else:
+                parts.append(cls._render_sql(child, fragments))
+            parts.append(child.tail or "")
+        return " ".join(parts)
+
     @staticmethod
     def _is_mapper(content: str) -> bool:
         return bool(re.search(r"<(?:\w+:)?mapper\b", content, re.I))
@@ -65,4 +82,3 @@ class MyBatisDetector(Detector):
         table, columns, operation = write_target(sql)
         if table:
             result.target_write_operations.append(TargetWriteOperation(table, columns, operation, location, unit_id))
-

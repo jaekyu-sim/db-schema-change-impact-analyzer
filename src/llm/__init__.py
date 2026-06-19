@@ -1,3 +1,3 @@
-from .mapping_agent import ColumnMapping, EvidenceMappingModel, MappingAgent
+from .mapping_agent import ColumnMapping, EvidenceMappingModel, MappingAgent, OpenAIResponsesMappingModel
 
-__all__ = ["ColumnMapping", "EvidenceMappingModel", "MappingAgent"]
+__all__ = ["ColumnMapping", "EvidenceMappingModel", "MappingAgent", "OpenAIResponsesMappingModel"]

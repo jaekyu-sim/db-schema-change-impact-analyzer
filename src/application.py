@@ -5,10 +5,13 @@ from pathlib import Path
 import re
 
 from src.detectors.jdbc_template_detector import JdbcTemplateDetector
+from src.detectors.jpa_detector import JpaDetector
 from src.detectors.mybatis_detector import MyBatisDetector
+from src.detectors.querydsl_detector import QueryDslDetector
+from src.detectors.spring_batch_detector import SpringBatchDetector
 from src.detectors.string_sql_detector import StringSqlDetector
 from src.index.project_index import ProjectIndex
-from src.llm.mapping_agent import EvidenceMappingModel, MappingAgent
+from src.llm.mapping_agent import EvidenceMappingModel, MappingAgent, MappingModel
 from src.output.report_writer import ReportWriter
 from src.scanner.project_scanner import ProjectScanner
 from src.workflow.langgraph_workflow import MappingWorkflow
@@ -39,17 +42,25 @@ def discover_projects(input_directory: str | Path) -> list[Path]:
     return projects
 
 
-def analyze(input_directory: str | Path, output_directory: str | Path) -> list[AnalysisResult]:
+def analyze(input_directory: str | Path, output_directory: str | Path, model: MappingModel | None = None) -> list[AnalysisResult]:
     output = Path(output_directory).resolve()
     output.mkdir(parents=True, exist_ok=True)
     writer = ReportWriter()
     results: list[AnalysisResult] = []
-    detectors = [MyBatisDetector(), JdbcTemplateDetector(), StringSqlDetector()]
-    workflow = MappingWorkflow(MappingAgent(EvidenceMappingModel()))
+    detectors = [MyBatisDetector(), JpaDetector(), QueryDslDetector(), JdbcTemplateDetector(), StringSqlDetector(), SpringBatchDetector()]
+    workflow = MappingWorkflow(MappingAgent(model or EvidenceMappingModel()))
 
     for project_path in discover_projects(input_directory):
         project = ProjectScanner().scan(project_path)
         index = ProjectIndex.build(project, detectors)
+        if not index.target_columns():
+            frameworks = ", ".join(sorted(project.technology_candidates)) or "없음"
+            raise ValueError(
+                f"{project_path.name}: Target write column을 찾지 못했습니다. "
+                f"기술 후보={frameworks}, SQL units={len(index.result.sql_units)}, "
+                f"write operations={len(index.result.target_write_operations)}. "
+                "지원되지 않는 write 패턴이므로 빈 보고서를 생성하지 않습니다."
+            )
         mappings = workflow.run(project, index)
         safe_name = re.sub(r"[^A-Za-z0-9._-]+", "_", project_path.name)
         base = output / f"{safe_name}_gap_mapping"
@@ -59,4 +70,3 @@ def analyze(input_directory: str | Path, output_directory: str | Path) -> list[A
         writer.write_excel(excel, mappings)
         results.append(AnalysisResult(project_path, len(index.target_columns()), (markdown, csv_path, excel)))
     return results
-

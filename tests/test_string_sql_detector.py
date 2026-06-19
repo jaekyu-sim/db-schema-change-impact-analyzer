@@ -34,7 +34,17 @@ class StringSqlDetectorTest(unittest.TestCase):
             self.assertEqual(["source_status"], result.source_read_operations[0].tables)
             self.assertEqual(["s.id", "s.code"], result.source_read_operations[0].columns)
 
+    def test_detects_standalone_sql_file(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "migration.sql").write_text('''
+              INSERT INTO target_status (status_id, label)
+              SELECT id, name FROM source_status;
+            ''', encoding="utf-8")
+            result = StringSqlDetector().detect(ProjectScanner().scan(root))
+            self.assertEqual("target_status", result.target_write_operations[0].target_table)
+            self.assertEqual(["status_id", "label"], result.target_write_operations[0].target_columns)
+
 
 if __name__ == "__main__":
     unittest.main()
-

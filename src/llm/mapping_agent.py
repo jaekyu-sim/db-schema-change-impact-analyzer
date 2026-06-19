@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
+import os
 import re
 from typing import Protocol
 
@@ -13,6 +15,14 @@ class ColumnMapping:
     source_column: str | None
     source_expression: str | None
     evidence: str | None = None
+
+    @property
+    def mapping_status(self) -> str:
+        if self.source_table and self.source_column:
+            return "MAPPED"
+        if self.source_expression:
+            return "DERIVED"
+        return "UNRESOLVED"
 
 
 class MappingModel(Protocol):
@@ -27,12 +37,50 @@ class MappingAgent:
 
     def map_column(self, target_table: str, target_column: str, context: str) -> ColumnMapping:
         prompt = (
-            "Infer data lineage only from the supplied evidence. Return source_table, "
-            "source_column, source_expression, and evidence. Do not return confidence.\n"
+            "You analyze a Spring Boot DB migration program. Infer lineage only from the supplied evidence. "
+            "Trace the target write backward through SQL parameters, entity/DTO fields, assignments, method calls, "
+            "batch processor transformations, and source reads. Return source_table, source_column, "
+            "source_expression, and concise evidence. Use null when evidence cannot establish a field. "
+            "For constants or generated values, source_table/source_column may be null and source_expression must explain it. "
+            "Never return a confidence field.\n"
             f"Target: {target_table}.{target_column}\nContext:\n{context}"
         )
         value = self.model.infer(prompt)
         return ColumnMapping(target_table, target_column, value.get("source_table"), value.get("source_column"), value.get("source_expression"), value.get("evidence"))
+
+
+class OpenAIResponsesMappingModel:
+    """OpenAI Responses API adapter with strict JSON-schema output."""
+
+    def __init__(self, model: str | None = None, api_key: str | None = None):
+        try:
+            from openai import OpenAI
+        except ImportError as exc:
+            raise RuntimeError("LLM 실행에 openai 패키지가 필요합니다. `pip install -e .`를 실행하세요.") from exc
+        key = api_key or os.getenv("OPENAI_API_KEY")
+        if not key:
+            raise RuntimeError("OPENAI_API_KEY 환경 변수가 필요합니다. 정적 분석만 실행하려면 --no-llm을 사용하세요.")
+        self.client = OpenAI(api_key=key)
+        self.model = model or os.getenv("OPENAI_MODEL", "gpt-5-mini")
+
+    def infer(self, prompt: str) -> dict[str, str | None]:
+        schema = {
+            "type": "object",
+            "properties": {
+                "source_table": {"type": ["string", "null"]},
+                "source_column": {"type": ["string", "null"]},
+                "source_expression": {"type": ["string", "null"]},
+                "evidence": {"type": ["string", "null"]},
+            },
+            "required": ["source_table", "source_column", "source_expression", "evidence"],
+            "additionalProperties": False,
+        }
+        response = self.client.responses.create(
+            model=self.model,
+            input=prompt,
+            text={"format": {"type": "json_schema", "name": "column_lineage", "strict": True, "schema": schema}},
+        )
+        return json.loads(response.output_text)
 
 
 class EvidenceMappingModel:

@@ -18,10 +18,26 @@ python-program-analysis-agent-springboot-data/
 
 ## 실행
 
-저장소 루트에서 다음 명령을 실행합니다.
+최초 한 번 의존성을 설치합니다.
 
 ```powershell
+python -m pip install -e .
+```
+
+OpenAI API 키와 사용할 모델을 설정한 뒤 실행합니다.
+
+```powershell
+$env:OPENAI_API_KEY="..."
+$env:OPENAI_MODEL="gpt-5-mini"
 python main.py
+```
+
+저장소 루트에서 실행하면 `test/` 아래 프로젝트를 모두 분석합니다. LLM은 전체 프로젝트가 아니라 Target 컬럼별 관련 코드 컨텍스트만 전달받습니다.
+
+LLM 연결 전 Detector가 Target write를 찾는지만 점검하려면 다음 명령을 사용합니다.
+
+```powershell
+python main.py --no-llm
 ```
 
 결과는 프로젝트별로 `output` 폴더에 생성됩니다.
@@ -32,6 +48,14 @@ output/
 ├─ my-migration-project_gap_mapping.csv
 └─ my-migration-project_gap_mapping.xlsx
 ```
+
+각 행은 Target DB 컬럼 하나를 나타내며 `source_table`, `source_column`, `source_expression`과 근거를 포함합니다. `mapping_status`는 다음 중 하나입니다.
+
+- `MAPPED`: Source table/column까지 확인됨
+- `DERIVED`: 상수, 함수, 조합식 등 expression으로 확인됨
+- `UNRESOLVED`: 수집한 코드 근거와 확장 재시도로도 확인되지 않음
+
+현재 Detector는 MyBatis XML, JPA Repository/Native Query, QueryDSL select/update, JdbcTemplate, NamedParameterJdbcTemplate, Java/Kotlin 문자열 SQL, 독립 SQL 파일, Spring Batch JDBC reader/writer 패턴을 수집합니다. 기술 후보 탐지는 실행 우선순위 참고용이며 Detector 실행을 차단하지 않습니다.
 
 기본 경로 대신 다른 폴더를 지정할 수도 있습니다.
 
@@ -45,4 +69,4 @@ python main.py --input C:\work\migration-projects --output C:\work\gap-output
 python -m unittest discover -s tests -v
 ```
 
-현재 기본 매핑 모델은 SQL에 명시된 `INSERT ... SELECT`의 위치 관계처럼 정적으로 증명되는 lineage를 처리합니다. 복잡한 서비스/DTO 변환을 추론하려면 `MappingModel` 구현에 실제 LLM 클라이언트를 연결해야 합니다.
+기본 실행은 OpenAI Responses API를 실제 호출합니다. `--no-llm` 모드는 SQL에 명시된 `INSERT ... SELECT`의 위치 관계처럼 정적으로 증명되는 lineage만 처리합니다.

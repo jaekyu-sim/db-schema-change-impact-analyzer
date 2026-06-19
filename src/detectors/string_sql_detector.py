@@ -28,8 +28,9 @@ class StringSqlDetector(Detector):
                 expression = " + ".join(fragments)
                 candidates.append((variable, expression, file.content[:match.start()].count("\n") + 1, "string_builder"))
             for variable, (expression, line) in java_assignments(file.content).items():
-                if "+" in expression:
-                    candidates.append((variable, expression, line, "string_concatenation"))
+                if re.search(r"\b(select|insert|update|delete|merge|with)\b", expression, re.I):
+                    construction = "string_concatenation" if "+" in expression else "string_literal"
+                    candidates.append((variable, expression, line, construction))
             for variable, expression, line, construction in candidates:
                 sql = compact_sql(decode_java_strings(expression))
                 if not re.search(r"\b(select|insert|update|delete|merge|with)\b", sql, re.I):
@@ -45,5 +46,18 @@ class StringSqlDetector(Detector):
                 table, columns, operation = write_target(sql)
                 if table:
                     result.target_write_operations.append(TargetWriteOperation(table, columns, operation, location, unit_id))
+        for file in project.by_suffix(".sql"):
+            for match in re.finditer(r"(?:^|;)\s*((?:select|insert|update|delete|merge|with)\b.*?)(?=;|$)", file.content, re.I | re.S):
+                sql = compact_sql(match.group(1))
+                line = file.content[:match.start(1)].count("\n") + 1
+                location = CodeLocation(file.relative_path, line)
+                unit_id = sql_id(self.name, file.relative_path, line, sql)
+                kind = statement_kind(sql)
+                result.sql_units.append(SqlUnit(unit_id, sql, kind, location, self.name, {"construction": "sql_file"}))
+                tables = source_tables(sql)
+                if kind == "select" or tables:
+                    result.source_read_operations.append(SourceReadOperation(tables, selected_expressions(sql), location, unit_id))
+                table, columns, operation = write_target(sql)
+                if table:
+                    result.target_write_operations.append(TargetWriteOperation(table, columns, operation, location, unit_id))
         return result
-

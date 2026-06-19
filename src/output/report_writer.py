@@ -8,7 +8,7 @@ from zipfile import ZIP_DEFLATED, ZipFile
 from src.llm.mapping_agent import ColumnMapping
 
 
-HEADERS = ["target_table", "target_column", "source_table", "source_column", "source_expression", "evidence"]
+HEADERS = ["target_table", "target_column", "source_table", "source_column", "source_expression", "mapping_status", "evidence"]
 
 
 class ReportWriter:

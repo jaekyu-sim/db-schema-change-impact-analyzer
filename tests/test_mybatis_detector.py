@@ -36,7 +36,16 @@ class MyBatisDetectorTest(unittest.TestCase):
             (root / "Broken.xml").write_text("<mapper><select", encoding="utf-8")
             self.assertEqual([], MyBatisDetector().detect(ProjectScanner().scan(root)).sql_units)
 
+    def test_expands_reusable_sql_include(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "Mapper.xml").write_text('''<mapper namespace="M">
+              <sql id="targetColumns">customer_id, display_name</sql>
+              <insert id="write">INSERT INTO target_customer (<include refid="targetColumns"/>) VALUES (#{id}, #{name})</insert>
+            </mapper>''', encoding="utf-8")
+            result = MyBatisDetector().detect(ProjectScanner().scan(root))
+            self.assertEqual(["customer_id", "display_name"], result.target_write_operations[0].target_columns)
+
 
 if __name__ == "__main__":
     unittest.main()
-

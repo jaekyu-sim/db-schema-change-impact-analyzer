@@ -10,7 +10,7 @@ from src.scanner.project_scanner import ProjectScan
 
 class JdbcTemplateDetector(Detector):
     name = "jdbc_template"
-    CALL = re.compile(r"(?P<receiver>\w*(?:JdbcTemplate|jdbcTemplate))\s*\.\s*(?P<method>queryForObject|queryForList|query|update|batchUpdate|execute)\s*\(\s*(?P<sql>\"(?:\\.|[^\"\\])*\"|[^,;)]+)", re.I)
+    CALL = re.compile(r"(?P<receiver>\w+)\s*\.\s*(?P<method>queryForObject|queryForList|query|update|batchUpdate|execute)\s*\(\s*(?P<sql>\"\"\".*?\"\"\"|\"(?:\\.|[^\"\\])*\"|\w+)", re.I | re.S)
 
     def supports(self, project: ProjectScan) -> bool:
         return "jdbc_template" in project.technology_candidates
@@ -19,10 +19,16 @@ class JdbcTemplateDetector(Detector):
         result = DetectionResult()
         for file in project.by_suffix(".java", ".kt"):
             assignments = java_assignments(file.content)
+            jdbc_receivers = {
+                match.group(1)
+                for match in re.finditer(r"\b(?:NamedParameterJdbcTemplate|JdbcTemplate)\s+(\w+)\b", file.content)
+            }
             for variable, (expression, line) in assignments.items():
                 if self._looks_like_sql(expression):
                     result.variable_assignments.append(VariableAssignment(variable, expression, CodeLocation(file.relative_path, line)))
             for match in self.CALL.finditer(file.content):
+                if match.group("receiver") not in jdbc_receivers and "jdbctemplate" not in match.group("receiver").lower():
+                    continue
                 line = file.content[:match.start()].count("\n") + 1
                 location = CodeLocation(file.relative_path, line)
                 sql_arg = match.group("sql").strip()
