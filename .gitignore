@@ -4,4 +4,8 @@ __pycache__/
 .venv/
 dist/
 *.egg-info/
-
+test/*
+!test/.gitkeep
+!test/README.md
+output/*
+!output/.gitkeep

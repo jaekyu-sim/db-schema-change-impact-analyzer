@@ -1,4 +1,3 @@
-from .mapping_agent import ColumnMapping, MappingAgent
+from .mapping_agent import ColumnMapping, EvidenceMappingModel, MappingAgent
 
-__all__ = ["ColumnMapping", "MappingAgent"]
-
+__all__ = ["ColumnMapping", "EvidenceMappingModel", "MappingAgent"]
