@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import logging
+from time import perf_counter
 from typing import Any, TypedDict
 
 from src.context.context_builder import ContextBuilder
@@ -7,6 +9,9 @@ from src.index.project_index import ProjectIndex
 from src.llm.mapping_agent import ColumnMapping, MappingAgent
 from src.scanner.project_scanner import ProjectScan
 from src.validator.coverage_validator import CoverageValidator
+
+
+logger = logging.getLogger(__name__)
 
 
 class ColumnState(TypedDict, total=False):
@@ -31,11 +36,25 @@ class MappingWorkflow:
 
     def run(self, project: ProjectScan, index: ProjectIndex) -> list[ColumnMapping]:
         expected = index.target_columns()
-        mappings = [self._run_column(project, index, table, column) for table, column in expected]
+        logger.info("컬럼 매핑 시작: 총 %d개 Target 컬럼", len(expected))
+        mappings: list[ColumnMapping] = []
+        for position, (table, column) in enumerate(expected, start=1):
+            started = perf_counter()
+            logger.info("컬럼 매핑 [%d/%d] 시작: %s.%s", position, len(expected), table, column)
+            mapping = self._run_column(project, index, table, column)
+            mappings.append(mapping)
+            logger.info(
+                "컬럼 매핑 [%d/%d] 완료: %s.%s -> %s.%s | %s | %.2f초",
+                position, len(expected), table, column,
+                mapping.source_table or "-", mapping.source_column or "-", mapping.mapping_status,
+                perf_counter() - started,
+            )
         coverage = self.validator.validate(expected, mappings)
         if not coverage.complete:
             existing = {(item.target_table, item.target_column) for item in mappings}
             mappings.extend(self._run_column(project, index, table, column, radius=120) for table, column in coverage.missing if (table, column) not in existing)
+        unresolved = sum(item.mapping_status == "UNRESOLVED" for item in mappings)
+        logger.info("컬럼 매핑 완료: 전체=%d, 미해결=%d", len(mappings), unresolved)
         return mappings
 
     def _run_column(self, project: ProjectScan, index: ProjectIndex, table: str, column: str, radius: int = 24) -> ColumnMapping:
@@ -70,8 +89,13 @@ class MappingWorkflow:
         return {**state, "context": context}
 
     def _infer(self, state: ColumnState) -> ColumnState:
+        attempt = state.get("attempt", 0) + 1
+        logger.debug(
+            "매핑 추론 호출: %s.%s, 시도=%d, context=%d자",
+            state["target_table"], state["target_column"], attempt, len(state.get("context", "")),
+        )
         mapping = self.agent.map_column(state["target_table"], state["target_column"], state.get("context", ""))
-        return {**state, "mapping": mapping, "attempt": state.get("attempt", 0) + 1}
+        return {**state, "mapping": mapping, "attempt": attempt}
 
     @staticmethod
     def _route(state: ColumnState) -> str:
@@ -81,4 +105,9 @@ class MappingWorkflow:
 
     @staticmethod
     def _expand(state: ColumnState) -> ColumnState:
-        return {**state, "radius": max(state.get("radius", 24) * 4, 96)}
+        radius = max(state.get("radius", 24) * 4, 96)
+        logger.info(
+            "미해결 컬럼 컨텍스트 확장 재시도: %s.%s, radius=%d",
+            state["target_table"], state["target_column"], radius,
+        )
+        return {**state, "radius": radius}

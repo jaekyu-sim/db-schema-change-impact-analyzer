@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 from dataclasses import dataclass, field
+import logging
 from pathlib import Path
+from time import perf_counter
 
 
 TEXT_SUFFIXES = {
@@ -9,6 +11,7 @@ TEXT_SUFFIXES = {
     ".kts", ".sql", ".py", ".md", ".txt",
 }
 IGNORED_DIRECTORIES = {".git", ".idea", ".gradle", "build", "target", "node_modules", "__pycache__"}
+logger = logging.getLogger(__name__)
 
 
 @dataclass(frozen=True)
@@ -46,6 +49,8 @@ class ProjectScanner:
         if not root_path.is_dir():
             raise ValueError(f"Project root is not a directory: {root_path}")
 
+        started = perf_counter()
+        logger.info("프로젝트 파일 스캔 시작: %s", root_path)
         files: list[ProjectFile] = []
         packages: set[str] = set()
         combined_parts: list[str] = []
@@ -60,6 +65,8 @@ class ProjectScanner:
                 continue
             relative = path.relative_to(root_path).as_posix()
             files.append(ProjectFile(path, relative, content))
+            if len(files) % 500 == 0:
+                logger.info("프로젝트 파일 스캔 중: %,d개 텍스트 파일 읽음", len(files))
             combined_parts.append(content.lower())
             for line in content.splitlines():
                 stripped = line.strip()
@@ -70,5 +77,8 @@ class ProjectScanner:
         technologies = {
             name for name, hints in self.TECH_HINTS.items() if any(hint in combined for hint in hints)
         }
+        logger.info(
+            "프로젝트 파일 스캔 완료: %,d개 파일, 기술 후보=%s, %.2f초",
+            len(files), ", ".join(sorted(technologies)) or "없음", perf_counter() - started,
+        )
         return ProjectScan(root_path, files, technologies, packages)
-

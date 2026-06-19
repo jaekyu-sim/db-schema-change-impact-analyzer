@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import logging
 from pathlib import Path
 
 from src.application import analyze
@@ -23,7 +24,24 @@ def main() -> int:
         choices=["json_mode", "json_schema", "function_calling", "raw"],
         help="서버가 지원하는 구조화 출력 방식; 기본값은 SLLM_STRUCTURED_OUTPUT_METHOD 또는 json_mode",
     )
+    parser.add_argument(
+        "--log-level",
+        choices=["DEBUG", "INFO", "WARNING", "ERROR"],
+        default="INFO",
+        help="진행 로그 상세도; 기본값 INFO",
+    )
     args = parser.parse_args()
+    logging.basicConfig(
+        level=getattr(logging, args.log_level),
+        format="%(asctime)s | %(levelname)s | %(message)s",
+        datefmt="%H:%M:%S",
+        force=True,
+    )
+    logger = logging.getLogger(__name__)
+    logger.info("Gap Mapping Agent 시작")
+    logger.info("입력 폴더: %s", args.input.resolve())
+    logger.info("출력 폴더: %s", args.output.resolve())
+    logger.info("실행 모드: %s", "정적 분석 (--no-llm)" if args.no_llm else "LangGraph + 로컬 sLLM")
     try:
         model = EvidenceMappingModel() if args.no_llm else LocalChatOpenAIMappingModel(
             model=args.model,
@@ -33,11 +51,13 @@ def main() -> int:
         )
         results = analyze(args.input, args.output, model=model)
     except (ValueError, RuntimeError) as exc:
+        logger.error("분석 실패: %s", exc)
         parser.error(str(exc))
     for result in results:
         print(f"[{result.project.name}] target columns: {result.target_column_count}")
         for report in result.reports:
             print(f"  - {report}")
+    logger.info("모든 프로젝트 분석 완료")
     return 0
 
 

@@ -50,6 +50,23 @@ class ApplicationTest(unittest.TestCase):
                 analyze(root / "test", root / "output")
             self.assertEqual([], list((root / "output").iterdir()))
 
+    def test_emits_pipeline_progress_logs(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            project = root / "test" / "logged-project"
+            project.mkdir(parents=True)
+            (project / "pom.xml").write_text("<project/>", encoding="utf-8")
+            (project / "migration.sql").write_text(
+                "INSERT INTO target_table (target_id) SELECT id FROM source_table;",
+                encoding="utf-8",
+            )
+            with self.assertLogs("src.application", level="INFO") as captured:
+                analyze(root / "test", root / "output")
+            messages = "\n".join(captured.output)
+            self.assertIn("프로젝트 분석 [1/1] 시작", messages)
+            self.assertIn("Markdown 보고서 저장", messages)
+            self.assertIn("전체 분석 파이프라인 완료", messages)
+
 
 if __name__ == "__main__":
     unittest.main()
