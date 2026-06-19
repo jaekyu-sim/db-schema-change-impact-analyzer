@@ -24,12 +24,26 @@ python-program-analysis-agent-springboot-data/
 python -m pip install -e .
 ```
 
-OpenAI API 키와 사용할 모델을 설정한 뒤 실행합니다.
+로컬 sLLM의 OpenAI-compatible endpoint와 모델명을 설정한 뒤 실행합니다. 예시는 vLLM 또는 호환 서버가 `localhost:8000/v1`에서 실행 중인 경우입니다.
 
 ```powershell
-$env:OPENAI_API_KEY="..."
-$env:OPENAI_MODEL="gpt-5-mini"
+$env:SLLM_BASE_URL="http://localhost:8000/v1"
+$env:SLLM_MODEL="설치된-모델명"
+$env:SLLM_API_KEY="not-needed"
+$env:SLLM_STRUCTURED_OUTPUT_METHOD="json_mode"
 python main.py
+```
+
+명령행 인자로도 지정할 수 있습니다.
+
+```powershell
+python main.py --base-url http://localhost:8000/v1 --model 설치된-모델명
+```
+
+서버가 `response_format`을 지원하지 않으면 raw JSON 모드를 사용합니다.
+
+```powershell
+python main.py --model 설치된-모델명 --structured-output raw
 ```
 
 저장소 루트에서 실행하면 `test/` 아래 프로젝트를 모두 분석합니다. LLM은 전체 프로젝트가 아니라 Target 컬럼별 관련 코드 컨텍스트만 전달받습니다.
@@ -69,4 +83,4 @@ python main.py --input C:\work\migration-projects --output C:\work\gap-output
 python -m unittest discover -s tests -v
 ```
 
-기본 실행은 OpenAI Responses API를 실제 호출합니다. `--no-llm` 모드는 SQL에 명시된 `INSERT ... SELECT`의 위치 관계처럼 정적으로 증명되는 lineage만 처리합니다.
+기본 실행은 `langchain_openai.ChatOpenAI`를 통해 로컬 sLLM을 호출하고, 컬럼별 분석은 LangGraph 상태 그래프로 실행합니다. `--no-llm` 모드는 SQL에 명시된 `INSERT ... SELECT`의 위치 관계처럼 정적으로 증명되는 lineage만 처리합니다.

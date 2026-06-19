@@ -9,4 +9,4 @@ test/
    └─ src/
 ```
 
-그다음 저장소 루트에서 `OPENAI_API_KEY`를 설정하고 `python main.py`를 실행합니다. 결과는 `output/`에 생성됩니다.
+그다음 저장소 루트에서 `SLLM_BASE_URL`, `SLLM_MODEL`을 설정하고 `python main.py`를 실행합니다. 결과는 `output/`에 생성됩니다.

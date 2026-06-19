@@ -49,38 +49,91 @@ class MappingAgent:
         return ColumnMapping(target_table, target_column, value.get("source_table"), value.get("source_column"), value.get("source_expression"), value.get("evidence"))
 
 
-class OpenAIResponsesMappingModel:
-    """OpenAI Responses API adapter with strict JSON-schema output."""
+class LocalChatOpenAIMappingModel:
+    """ChatOpenAI adapter for a local OpenAI-compatible sLLM server."""
 
-    def __init__(self, model: str | None = None, api_key: str | None = None):
+    METHODS = {"json_mode", "json_schema", "function_calling", "raw"}
+
+    def __init__(
+        self,
+        model: str | None = None,
+        base_url: str | None = None,
+        api_key: str | None = None,
+        structured_output_method: str | None = None,
+        timeout: float = 120.0,
+        chat_model: object | None = None,
+    ):
+        self.model = model or os.getenv("SLLM_MODEL")
+        if not self.model:
+            raise RuntimeError("로컬 sLLM 모델명이 필요합니다. SLLM_MODEL 또는 --model을 설정하세요.")
+        self.base_url = base_url or os.getenv("SLLM_BASE_URL", "http://localhost:8000/v1")
+        self.method = structured_output_method or os.getenv("SLLM_STRUCTURED_OUTPUT_METHOD", "json_mode")
+        if self.method not in self.METHODS:
+            raise RuntimeError(f"지원하지 않는 structured output 방식입니다: {self.method}")
+        if chat_model is None:
+            try:
+                from langchain_openai import ChatOpenAI
+            except ImportError as exc:
+                raise RuntimeError("로컬 LLM 실행에 langchain-openai가 필요합니다. `pip install -e .`를 실행하세요.") from exc
+            chat_model = ChatOpenAI(
+                model=self.model,
+                base_url=self.base_url,
+                api_key=api_key or os.getenv("SLLM_API_KEY", "not-needed"),
+                temperature=0,
+                timeout=timeout,
+                max_retries=2,
+            )
+        self.chat_model = chat_model
+        self.structured_model = None if self.method == "raw" else self._structured(chat_model)
+
+    def _structured(self, chat_model: object) -> object:
         try:
-            from openai import OpenAI
+            from pydantic import BaseModel, Field
         except ImportError as exc:
-            raise RuntimeError("LLM 실행에 openai 패키지가 필요합니다. `pip install -e .`를 실행하세요.") from exc
-        key = api_key or os.getenv("OPENAI_API_KEY")
-        if not key:
-            raise RuntimeError("OPENAI_API_KEY 환경 변수가 필요합니다. 정적 분석만 실행하려면 --no-llm을 사용하세요.")
-        self.client = OpenAI(api_key=key)
-        self.model = model or os.getenv("OPENAI_MODEL", "gpt-5-mini")
+            raise RuntimeError("구조화 출력에 pydantic이 필요합니다. `pip install -e .`를 실행하세요.") from exc
+
+        class LineageResponse(BaseModel):
+            source_table: str | None = Field(description="Physical source DB table, or null")
+            source_column: str | None = Field(description="Physical source DB column, or null")
+            source_expression: str | None = Field(description="Transformation, constant, or source expression, or null")
+            evidence: str | None = Field(description="Concise code evidence, or null")
+
+        return chat_model.with_structured_output(LineageResponse, method=self.method)
 
     def infer(self, prompt: str) -> dict[str, str | None]:
-        schema = {
-            "type": "object",
-            "properties": {
-                "source_table": {"type": ["string", "null"]},
-                "source_column": {"type": ["string", "null"]},
-                "source_expression": {"type": ["string", "null"]},
-                "evidence": {"type": ["string", "null"]},
-            },
-            "required": ["source_table", "source_column", "source_expression", "evidence"],
-            "additionalProperties": False,
-        }
-        response = self.client.responses.create(
-            model=self.model,
-            input=prompt,
-            text={"format": {"type": "json_schema", "name": "column_lineage", "strict": True, "schema": schema}},
+        if self.structured_model is not None:
+            result = self.structured_model.invoke(prompt)
+            if hasattr(result, "model_dump"):
+                result = result.model_dump()
+            return self._normalize(result)
+        response = self.chat_model.invoke(
+            prompt + "\nReturn only one JSON object with keys source_table, source_column, source_expression, evidence."
         )
-        return json.loads(response.output_text)
+        content = self._message_text(getattr(response, "content", response))
+        fenced = re.search(r"```(?:json)?\s*(\{.*?\})\s*```", content, re.I | re.S)
+        candidate = fenced.group(1) if fenced else content[content.find("{"):content.rfind("}") + 1]
+        try:
+            return self._normalize(json.loads(candidate))
+        except (json.JSONDecodeError, TypeError) as exc:
+            raise RuntimeError(f"로컬 sLLM이 유효한 lineage JSON을 반환하지 않았습니다: {content[:300]}") from exc
+
+    @staticmethod
+    def _message_text(content: object) -> str:
+        if isinstance(content, str):
+            return content
+        if isinstance(content, list):
+            return "".join(
+                str(block.get("text", "")) if isinstance(block, dict) else str(block)
+                for block in content
+            )
+        return str(content)
+
+    @staticmethod
+    def _normalize(value: object) -> dict[str, str | None]:
+        if not isinstance(value, dict):
+            raise RuntimeError(f"로컬 sLLM 구조화 출력 형식이 dict가 아닙니다: {type(value).__name__}")
+        keys = ("source_table", "source_column", "source_expression", "evidence")
+        return {key: str(value[key]) if value.get(key) is not None else None for key in keys}
 
 
 class EvidenceMappingModel:
